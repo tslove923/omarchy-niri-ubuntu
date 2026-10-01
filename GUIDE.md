@@ -251,8 +251,7 @@ bar won't find its QML modules. Use the systemd unit (stage 40) or the driver.
 
 **Verified (on the reference Ubuntu 24.04 + niri machine):**
 - The shell tree, config, helpers, omarchy-bin drivers, units, and theme files
-  are byte-for-byte the ones that produced a working bar (screenshots in
-  `screenshots/`).
+  are byte-for-byte the ones that produced a working bar.
 - `niri validate` passes on the shipped `config.kdl`.
 - Walker end-to-end launch works after the elephant fix.
 - The wall-kiosk timer captures and applies fresh frames; theme switching
