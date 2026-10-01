@@ -58,7 +58,6 @@ helpers/                    Ubuntu stubs for Arch-only omarchy-* binaries
 omarchy-bin/                omarchy-shell, omarchy-theme-*, omarchy-hook drivers
 systemd/                    elephant.service, wall-kiosk units, walker drop-in
 theme/wall-kiosk/           live-capture wallpaper theme
-screenshots/                verification screenshots from the reference build
 docs/                       deeper notes on specific fixes
 ```
 
