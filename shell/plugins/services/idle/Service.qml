@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell
-import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import "IdleModel.js" as IdleModel
@@ -143,16 +142,11 @@ Item {
     return IdleModel.eventParts(event, count)
   }
 
+  // niri port: Hyprland raw events are unavailable here. The screensaver-window
+  // tracking that used them is optional; IdleMonitor alone drives the
+  // screensaver+lock cycle. Kept as a no-op so existing callers stay valid.
   function handleHyprlandEvent(event) {
-    var name = String(event && event.name ? event.name : "")
-    if (name === "openwindow") {
-      var open = eventParts(event, 4)
-      if (String(open[2] || "") === root.screensaverClass) root.handleScreensaverWindowOpened(open[0])
-    } else if (name === "closewindow") {
-      var close = eventParts(event, 1)
-      var address = String(close[0] || "")
-      if (root.screensaverWindows[address]) root.handleScreensaverWindowClosed(address)
-    }
+    return
   }
 
   function handleActiveSignal() {
@@ -279,11 +273,6 @@ Item {
         root.cancelIdleCycle("screensaver-not-running")
       }
     }
-  }
-
-  Connections {
-    target: Hyprland
-    function onRawEvent(event) { root.handleHyprlandEvent(event) }
   }
 
   Process {

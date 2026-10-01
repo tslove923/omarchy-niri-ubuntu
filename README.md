@@ -47,6 +47,7 @@ scripts/
   10-install-qt-quickshell.sh  Qt 6.8.3 (aqtinstall) + quickshell build (sudo)
   20-install-niri-session.sh   niri + GDM on-demand session + CLI deps (sudo)
   30-deploy-shell.sh        deploy shell tree, config, helpers, units
+  35-install-ui-extras.sh   fonts, lock screen + idle, extra bar widgets
   40-wire-session.sh        wire into a LIVE niri session (run inside niri)
   50-verify.sh              read-only PASS/FAIL checks
 shell/                      the ported Omarchy quickshell (OMARCHY_PATH/shell)

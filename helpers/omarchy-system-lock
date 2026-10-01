@@ -1,0 +1,40 @@
+#!/bin/bash
+# omarchy:summary=Lock the computer (niri port)
+# omarchy:group=system
+# omarchy:name=lock
+# omarchy:examples=omarchy system lock
+#
+# Ported for ubuntuvm2 (niri + ported Omarchy quickshell shell).
+# Upstream Omarchy drives hyprlock; this port locks through the shell lock
+# plugin, which owns an ext-session-lock surface (WlSessionLock) and
+# authenticates via PAM (/etc/pam.d/omarchy-lock-password).
+
+set -uo pipefail
+
+# Recover the Wayland/niri env when invoked from outside the session.
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+export XDG_RUNTIME_DIR
+if [[ -z ${WAYLAND_DISPLAY:-} ]]; then
+  sock=$(ls -t "$XDG_RUNTIME_DIR"/wayland-[0-9]* 2>/dev/null | grep -v "\.lock$" | head -n1)
+  [[ -n $sock ]] && export WAYLAND_DISPLAY=${sock##*/}
+fi
+export OMARCHY_PATH=${OMARCHY_PATH:-/home/trevor/omarchy-port}
+[[ -n ${NIRI_SOCKET:-} ]] || export NIRI_SOCKET=$(ls "$XDG_RUNTIME_DIR"/niri*.sock 2>/dev/null | head -n1)
+
+# The screensaver step blanks outputs via DPMS; bring them back so the
+# ext-session-lock surface is actually visible.
+niri msg action power-on-monitors >/dev/null 2>&1 || true
+
+# Stop a running screensaver terminal before locking.
+pkill -x ttfx 2>/dev/null || true
+pkill -f "[o]rg.omarchy.screensaver" 2>/dev/null || true
+
+# Ask the shell lock plugin to lock. It refuses (missing-pam) without the
+# PAM file, so surface that instead of silently doing nothing.
+result=$(omarchy-shell -q lock lock 2>/dev/null)
+if [[ $result == "missing-pam" || $result == "failed" ]]; then
+  omarchy-notification-send "Lock unavailable ($result)" 2>/dev/null || true
+  exit 1
+fi
+
+exit 0

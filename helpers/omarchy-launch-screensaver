@@ -1,0 +1,30 @@
+#!/bin/bash
+# omarchy:summary=Launch the Omarchy screensaver (niri port)
+#
+# Ported for ubuntuvm2 (niri + ported Omarchy quickshell shell).
+# Upstream spawns a `tte` animation in a terminal window classed
+# org.omarchy.screensaver. That binary/config is not ported here, so the
+# screensaver is implemented natively: blank the outputs via DPMS. The lock
+# plugin still fires at the later lock deadline and powers the outputs back on
+# so its ext-session-lock surface is visible.
+
+set -uo pipefail
+
+# Exit early if the session is already locked; the lock owns the display.
+export OMARCHY_PATH=${OMARCHY_PATH:-/home/trevor/omarchy-port}
+if [[ $(omarchy-shell -q lock isLocked 2>/dev/null) == "true" ]]; then
+  exit 0
+fi
+
+# `force` bypasses the user disable flag, matching upstream semantics.
+if [[ ${1:-} != "force" && -e ${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/disable-screensaver ]]; then
+  exit 1
+fi
+
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+export XDG_RUNTIME_DIR
+[[ -n ${NIRI_SOCKET:-} ]] || export NIRI_SOCKET=$(ls "$XDG_RUNTIME_DIR"/niri*.sock 2>/dev/null | head -n1)
+
+niri msg action power-off-monitors >/dev/null 2>&1 || true
+
+exit 0

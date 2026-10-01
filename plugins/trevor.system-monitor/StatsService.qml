@@ -1,0 +1,287 @@
+import QtQuick
+import Quickshell.Io
+
+// Polled CPU / GPU / NPU / RAM / swap / disk monitor.
+//
+// One atomic snapshot per tick: a single `sh -c` reads every source and emits
+// `KEY=VALUE` lines, parsed once in parse(). The script is a compile-time
+// constant — no user input, no QML interpolation — so it is safe to run in the
+// shell session. All sources are world-readable /proc and /sys files plus df.
+//
+// A missing sysfs path prints the `NA` sentinel (never a bare 0) so a missing
+// GPU/NPU device sets available=false and the meter hides, distinct from a real
+// idle reading.
+//
+// Ubuntu/niri port: the GPU probe tries three paths in order and falls back to
+// `NA`:
+//   1. Intel Arc (Lunar Lake) gtidle idle_residency_ms + tile0/gt0 freq  [archultra]
+//   2. AMD amdgpu gpu_busy_percent (+ hwmon freq1 sclk, Hz -> MHz)       [this VM]
+//   3. NA -> gpuAvailable=false, meter hides
+// The CPU-frequency probe also tries the policyN layout (newer kernels) before
+// cpu0, and degrades to "Idle" (0) when the host exposes no cpufreq at all
+// (this VM runs without a cpufreq driver).
+QtObject {
+  id: root
+
+  // ---- public surface (bound by the meters row + hover card) ----
+  property real cpuUsage: 0          // 0..1
+  property int cpuFreqMhz: 0
+  property int cpuMaxMhz: 0
+  property real memUsedKb: 0
+  property real memTotalKb: 0
+  property real swapUsedKb: 0
+  property real swapTotalKb: 0
+  property bool gpuAvailable: false
+  property real gpuUsage: 0
+  property int gpuFreqMhz: 0
+  property int gpuMaxMhz: 0
+  property bool npuAvailable: false
+  property real npuUsage: 0
+  property int npuFreqMhz: 0
+  property int npuMaxMhz: 0
+  property real npuMemBytes: 0        // NPU memory utilization (bytes)
+  property string npuStatus: ""
+  property real diskUsedKb: 0
+  property real diskAvailKb: 0
+  property real diskTotalKb: 0
+  property int diskPct: 0
+  property string memSpeed: ""        // DRAM configured speed ("8533 MT/s"); via dmidecode, "" if unavailable
+  property string diskSpeed: ""       // first NVMe link speed ("8.0 GT/s"); "" on non-NVMe
+
+  property int interval: 3000
+  property bool enabled: true
+
+  // ---- diff state (first sample records, second computes) ----
+  property var prevCpu: null
+  property real prevGpuIdle: -1
+  property real prevGpuWall: 0
+  property real prevNpuBusy: -1
+  property real prevNpuWall: 0
+
+  function refresh() {
+    if (!pollProc.running) pollProc.running = true
+  }
+
+  // QtObject has no default property in this Qt, so the Timer and Process are
+  // declared as properties instead of children.
+  property Timer pollTimer: Timer {
+    interval: root.interval
+    running: root.enabled
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.refresh()
+  }
+
+  // QML has no triple-quoted strings, so the script is a list of lines joined
+  // with \n. The inner double quotes are omitted — every value is a space-
+  // separated run of tokens (no glob chars, no embedded spaces), so unquoted
+  // `echo $(...)` is word-splitting-safe and prints single-spaced. The single
+  // quotes inside the awk/grep programs are literal inside these QML strings.
+  readonly property string snapshotScript: [
+    "LANG=C",
+    "{",
+    "  echo cpu=$(head -1 /proc/stat)",
+    // CPU freq: newer kernels expose policyN; fall back to cpu0; NA if no cpufreq.
+    "  cur=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq 2>/dev/null || cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo NA)",
+    "  echo cur=$cur",
+    "  cmax=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq 2>/dev/null || cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null || echo NA)",
+    "  echo cmax=$cmax",
+    "  echo mem=$(grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo | xargs)",
+    // GPU path 1: Intel Arc gtidle (idle residency, matches wall-clock ms).
+    "  g1=$(cat /sys/class/drm/card0/device/tile0/gt0/gtidle/idle_residency_ms 2>/dev/null)",
+    "  g2=$(cat /sys/class/drm/card0/device/tile0/gt0/freq0/act_freq 2>/dev/null)",
+    "  g3=$(cat /sys/class/drm/card0/device/tile0/gt0/freq0/max_freq 2>/dev/null)",
+    // GPU path 2: AMD amdgpu busy percent + hwmon sclk (freq1, Hz). Some cards
+    // expose busy percent only when amdgpu is bound and the card is powered on.
+    "  if [ -n \"$g1\" ]; then",
+    "    echo gmode=intel",
+    "    echo gidle=$g1",
+    "    echo gact=$g2",
+    "    echo gmax=$g3",
+    "  else",
+    "    gb=$(cat /sys/class/drm/card0/device/gpu_busy_percent 2>/dev/null)",
+    "    ghz=$(cat /sys/class/drm/card0/device/hwmon/hwmon0/freq1_input 2>/dev/null)",
+    "    if [ -n \"$gb\" ]; then",
+    "      echo gmode=amd",
+    "      echo gbusy=$gb",
+    // sclk is in Hz; convert to MHz (integer) so the freq column reads MHz.
+    "      echo gclk=$([ -n \"$ghz\" ] && echo $((ghz / 1000000)) || echo 0)",
+    "      echo gmax=1",
+    "    else",
+    "      echo gmode=na",
+    "      echo gidle=NA",
+    "      echo gact=NA",
+    "      echo gmax=0",
+    "    fi",
+    "  fi",
+    // NPU (Intel Lunar Lake accel0). Absent on this VM -> NA -> hidden.
+    "  echo nbusy=$(cat /sys/class/accel/accel0/device/npu_busy_time_us 2>/dev/null || echo NA)",
+    "  echo nstat=$(cat /sys/class/accel/accel0/device/power/runtime_status 2>/dev/null || echo NA)",
+    "  echo ncur=$(cat /sys/class/accel/accel0/device/npu_current_frequency_mhz 2>/dev/null || echo NA)",
+    "  echo nmax=$(cat /sys/class/accel/accel0/device/npu_max_frequency_mhz 2>/dev/null || echo NA)",
+    "  echo nmem=$(cat /sys/class/accel/accel0/device/npu_memory_utilization 2>/dev/null || echo NA)",
+    "  echo disk=$(df -P / | awk 'NR==2 {print $2, $3, $4, $5}')",
+    "}"
+  ].join("\n")
+
+  property Process pollProc: Process {
+    command: ["sh", "-c", root.snapshotScript]
+    stdout: StdioCollector {
+      id: pollOutput
+      waitForEnd: true
+      onStreamFinished: root.parse(pollOutput.text)
+    }
+  }
+
+  // Static clock reads (DRAM speed, NVMe/block link speed) — one-shot at
+  // startup, not per poll. RAM speed needs dmidecode + passwordless sudo
+  // (`sudo -n` never prompts); both fall back to "" so the freq column shows
+  // "—". NVMe link speed is NVMe-only; virtio disks (this VM: /dev/vda) have
+  // no equivalent, so the column stays "—".
+  readonly property string clockScript: [
+    "LANG=C",
+    "{",
+    "  echo memspeed=$(sudo -n dmidecode -t memory 2>/dev/null | awk -F: '/Configured Memory Speed/ {print $2; exit}')",
+    "  echo ssd=$(cat /sys/class/nvme/nvme*/device/current_link_speed 2>/dev/null | head -1)",
+    "}"
+  ].join("\n")
+
+  property Process clockProc: Process {
+    command: ["sh", "-c", root.clockScript]
+    stdout: StdioCollector {
+      id: clockOutput
+      waitForEnd: true
+      onStreamFinished: root.parseClocks(clockOutput.text)
+    }
+  }
+
+  function parseClocks(text) {
+    const raw = {}
+    const lines = (text || "").split("\n")
+    for (const line of lines) {
+      const i = line.indexOf("=")
+      if (i < 0) continue
+      raw[line.slice(0, i)] = line.slice(i + 1)
+    }
+    root.memSpeed = String(raw.memspeed || "").trim()
+    // Trim the trailing " PCIe" so "8.0 GT/s" fits the freq column.
+    root.diskSpeed = String(raw.ssd || "").replace(/\s*PCIe$/, "").trim()
+  }
+
+  Component.onCompleted: clockProc.running = true
+
+  function parse(text) {
+    const raw = {}
+    const lines = (text || "").split("\n")
+    for (let line of lines) {
+      const i = line.indexOf("=")
+      if (i < 0) continue
+      raw[line.slice(0, i)] = line.slice(i + 1)
+    }
+    const now = Date.now()
+
+    // CPU: aggregate /proc/stat delta. Fields after the "cpu" token are
+    // user nice system idle iowait irq softirq — idle is index 4.
+    const c = (raw.cpu || "").trim().split(/\s+/)
+    if (c.length >= 8) {
+      const idle = parseInt(c[4]) || 0
+      const total = (parseInt(c[1]) || 0) + (parseInt(c[2]) || 0) + (parseInt(c[3]) || 0)
+        + idle + (parseInt(c[5]) || 0) + (parseInt(c[6]) || 0) + (parseInt(c[7]) || 0)
+      if (root.prevCpu) {
+        const dT = total - root.prevCpu.total
+        const dI = idle - root.prevCpu.idle
+        root.cpuUsage = dT > 0 ? Math.max(0, Math.min(1, 1 - dI / dT)) : 0
+      }
+      root.prevCpu = { total: total, idle: idle }
+    }
+    // NA (no cpufreq driver) -> 0 -> UI shows "Idle".
+    root.cpuFreqMhz = Math.round((parseInt(raw.cur) || 0) / 1000)   // kHz -> MHz
+    root.cpuMaxMhz = Math.round((parseInt(raw.cmax) || 0) / 1000)
+
+    // Memory / swap (KB)
+    let mt = 0, ma = 0, st = 0, sf = 0
+    const mems = (raw.mem || "").match(/MemTotal:\s*\d+|MemAvailable:\s*\d+|SwapTotal:\s*\d+|SwapFree:\s*\d+/g) || []
+    for (const m of mems) {
+      const bits = m.split(/\s+/)
+      const n = parseInt(bits[1]) || 0
+      if (bits[0] === "MemTotal:") mt = n
+      else if (bits[0] === "MemAvailable:") ma = n
+      else if (bits[0] === "SwapTotal:") st = n
+      else if (bits[0] === "SwapFree:") sf = n
+    }
+    root.memTotalKb = mt
+    root.memUsedKb = Math.max(0, mt - ma)
+    root.swapTotalKb = st
+    root.swapUsedKb = Math.max(0, st - sf)
+
+    // ---- GPU: two backend readings ----
+    // Intel: utilization via gtidle idle_residency_ms (like nvtop):
+    //   usage = 1 - idleDelta/wallDelta. The counter is in ms and wall is in ms.
+    // AMD:   gpu_busy_percent is an instantaneous percentage; use it directly
+    //   and read the sclk clock from hwmon (already MHz after the shell divide).
+    const gmode = (raw.gmode || "").trim()
+    if (gmode === "intel") {
+      const gidle = parseFloat(raw.gidle)
+      root.gpuMaxMhz = parseInt(raw.gmax) || 0
+      root.gpuFreqMhz = parseInt(raw.gact) || 0
+      root.gpuAvailable = !isNaN(gidle) && root.gpuMaxMhz > 0
+      if (root.gpuAvailable) {
+        if (root.prevGpuIdle >= 0 && root.prevGpuWall > 0) {
+          const wall = now - root.prevGpuWall
+          const dI = gidle - root.prevGpuIdle
+          if (wall > 0 && dI >= 0) root.gpuUsage = Math.max(0, Math.min(1, 1 - dI / wall))
+        }
+        root.prevGpuIdle = gidle
+        root.prevGpuWall = now
+      } else {
+        root.gpuUsage = 0
+        root.prevGpuIdle = -1
+      }
+    } else if (gmode === "amd") {
+      const busy = parseFloat(raw.gbusy)
+      const clk = parseInt(raw.gclk) || 0
+      root.gpuFreqMhz = clk
+      root.gpuMaxMhz = clk > 0 ? clk : 1   // sentinel: available without a real max
+      root.gpuAvailable = !isNaN(busy)
+      root.gpuUsage = root.gpuAvailable ? Math.max(0, Math.min(1, busy / 100)) : 0
+      root.prevGpuIdle = -1
+    } else {
+      root.gpuAvailable = false
+      root.gpuUsage = 0
+      root.gpuFreqMhz = 0
+      root.gpuMaxMhz = 0
+      root.prevGpuIdle = -1
+    }
+
+    // NPU usage via npu_busy_time_us delta; busy counter freezes while suspended.
+    const nbusy = parseFloat(raw.nbusy)
+    root.npuMaxMhz = parseInt(raw.nmax) || 0
+    root.npuFreqMhz = parseInt(raw.ncur) || 0
+    root.npuMemBytes = parseFloat(raw.nmem) || 0
+    root.npuStatus = (raw.nstat || "").trim()
+    root.npuAvailable = !isNaN(nbusy) && root.npuMaxMhz > 0
+    if (root.npuAvailable) {
+      if (root.prevNpuBusy >= 0 && root.prevNpuWall > 0) {
+        const wallUs = (now - root.prevNpuWall) * 1000
+        const d = nbusy - root.prevNpuBusy
+        if (wallUs > 0 && d >= 0) root.npuUsage = Math.max(0, Math.min(1, d / wallUs))
+      }
+      if (root.npuStatus === "suspended") root.npuUsage = 0
+      root.prevNpuBusy = nbusy
+      root.prevNpuWall = now
+    } else {
+      root.npuUsage = 0
+      root.prevNpuBusy = -1
+    }
+
+    // Disk: `df -P /` prints "total used avail pct%". On a btrfs root this is
+    // the subvolume allocation, so used + free != total (reserved space).
+    const d = (raw.disk || "").trim().split(/\s+/)
+    if (d.length >= 4) {
+      root.diskTotalKb = parseFloat(d[0]) || 0
+      root.diskUsedKb = parseFloat(d[1]) || 0
+      root.diskAvailKb = parseFloat(d[2]) || 0
+      root.diskPct = parseInt(d[3]) || 0
+    }
+  }
+}

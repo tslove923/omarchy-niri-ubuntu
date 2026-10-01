@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "trevor.system-monitor",
+  "name": "System Monitor",
+  "version": "0.2.0",
+  "author": "tlove923",
+  "license": "MIT",
+  "description": "CPU / GPU / NPU / RAM / swap / disk meters (text or icons) with a hover details card.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "System Monitor",
+    "description": "CPU/GPU/NPU/RAM/swap/disk meters (text or icons)",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "left",
+    "defaults": {
+      "updateInterval": 3000,
+      "cpuThreshold": 90,
+      "gpuThreshold": 95,
+      "npuThreshold": 95,
+      "memoryThreshold": 95,
+      "swapThreshold": 85,
+      "diskThreshold": 90,
+      "showCpu": "Auto",
+      "showGpu": "Auto",
+      "showNpu": "Auto",
+      "showRam": "Auto",
+      "showSwap": "Auto",
+      "showDisk": "Auto",
+      "displayMode": "Text"
+    },
+    "schema": [
+      { "key": "updateInterval", "type": "number", "label": "Update interval (ms)" },
+      { "key": "cpuThreshold", "type": "number", "label": "CPU warning threshold (%)" },
+      { "key": "gpuThreshold", "type": "number", "label": "GPU warning threshold (%)" },
+      { "key": "npuThreshold", "type": "number", "label": "NPU warning threshold (%)" },
+      { "key": "memoryThreshold", "type": "number", "label": "RAM warning threshold (%)" },
+      { "key": "swapThreshold", "type": "number", "label": "Swap warning threshold (%)" },
+      { "key": "diskThreshold", "type": "number", "label": "Disk warning threshold (%)" },
+      { "key": "showCpu", "type": "enum", "label": "CPU meter", "options": ["Auto", "Show", "Hide"], "defaultValue": "Auto", "description": "Auto/Show always show on any hardware; Hide removes the meter." },
+      { "key": "showGpu", "type": "enum", "label": "GPU meter", "options": ["Auto", "Show", "Hide"], "defaultValue": "Auto", "description": "Auto shows only when a compatible Intel GPU is detected; Show/Hide override on any hardware." },
+      { "key": "showNpu", "type": "enum", "label": "NPU meter", "options": ["Auto", "Show", "Hide"], "defaultValue": "Auto", "description": "Auto shows only when an NPU is detected; Show/Hide override on any hardware." },
+      { "key": "showRam", "type": "enum", "label": "RAM meter", "options": ["Auto", "Show", "Hide"], "defaultValue": "Auto", "description": "Auto/Show always show on any hardware; Hide removes the meter." },
+      { "key": "showSwap", "type": "enum", "label": "Swap meter", "options": ["Auto", "Show", "Hide"], "defaultValue": "Auto", "description": "Auto shows only when a swap device exists; Show/Hide override." },
+      { "key": "showDisk", "type": "enum", "label": "Disk meter", "options": ["Auto", "Show", "Hide"], "defaultValue": "Auto", "description": "Auto/Show always show on any hardware; Hide removes the meter." },
+      { "key": "displayMode", "type": "enum", "label": "Meter display", "options": ["Text", "Icons"], "defaultValue": "Text", "description": "Text shows 'cpu: 25% ...'; Icons shows Nerd glyphs. Click the widget in the bar to toggle." }
+    ]
+  }
+}

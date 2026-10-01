@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "trevor.ii-clock",
+  "name": "ii Clock",
+  "version": "1.0.0",
+  "author": "tslove923",
+  "license": "MIT",
+  "description": "Time · date · ISO week label styled after the illogical-impulse Quickshell bar's ClockWidget.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "ii Clock",
+    "description": "Time • date • ISO work-week label",
+    "category": "Time",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "format": "h:mm ap",
+      "dateFormat": "ddd, MM/dd",
+      "showDate": true
+    },
+    "schema": [
+      { "key": "format", "type": "text", "label": "Time format", "description": "Qt date/time format string for the clock, e.g. 'h:mm ap' or 'HH:mm'." },
+      { "key": "dateFormat", "type": "text", "label": "Date format", "description": "Qt date/time format string for the date, e.g. 'ddd, MM/dd'." },
+      { "key": "showDate", "type": "boolean", "label": "Show date and week", "description": "Show the date and ISO work-week alongside the time.", "defaultValue": true }
+    ]
+  }
+}

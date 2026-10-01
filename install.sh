@@ -11,6 +11,7 @@
 #   10-install-qt-quickshell.sh Qt 6.8.3 + quickshell build (sudo)
 #   20-install-niri-session.sh  niri + GDM on-demand session + CLI deps (sudo)
 #   30-deploy-shell.sh          ported shell, config, helpers, units
+   35-install-ui-extras.sh     fonts, lock+idle, extra bar widgets
 #   40-wire-session.sh          session wiring (run INSIDE niri)
 #   50-verify.sh                read-only verification
 #
@@ -70,6 +71,7 @@ bash "$HERE/scripts/20-install-niri-session.sh"
 
 log "Stage 30 - deploy ported shell/config/helpers"
 bash "$HERE/scripts/30-deploy-shell.sh"
+bash "$HERE/scripts/35-install-ui-extras.sh"
 
 cat <<'EOF'
 

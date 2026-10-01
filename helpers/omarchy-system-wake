@@ -1,0 +1,14 @@
+#!/bin/bash
+# omarchy:summary=Wake displays and restore brightness after idle (niri port)
+# omarchy:group=system
+# omarchy:name=wake
+# omarchy:examples=omarchy system wake
+#
+# Ported for ubuntuvm2 (niri). Upstream restores a clamshell monitor layout;
+# niri has no clamshell concept here, so only restore display brightness.
+
+set -uo pipefail
+
+omarchy-brightness-display on 2>/dev/null || true
+
+exit 0
