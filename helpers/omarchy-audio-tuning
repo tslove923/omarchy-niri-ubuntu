@@ -1,0 +1,18 @@
+#!/bin/bash
+# Ubuntu-ported helper for a niri-on-Ubuntu host (niri, Ubuntu 24.04).
+# Minimal stand-in for the `omarchy-audio-tuning fronted-sink` subcommand the
+# real omarchy-audio-sink-availability calls. This VM has no speaker tuning
+# (no LV2 filter-chain, no matching DMI tuning directory), so nothing fronts
+# any sink: exit 1 with no output, which callers read as "no tuning in place".
+
+case "${1:-}" in
+  fronted-sink)
+    exit 1
+    ;;
+  status)
+    echo "Installed:    no"
+    ;;
+  *)
+    exit 1
+    ;;
+esac

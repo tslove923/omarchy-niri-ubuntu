@@ -1,0 +1,116 @@
+#!/bin/bash
+# Ubuntu-ported stub of the Omarchy helper `omarchy-brightness-display`.
+# Ported for a niri-on-Ubuntu host (niri, Ubuntu 24.04). Same CLI surface the monitor
+# panel uses:
+#   omarchy-brightness-display [--no-osd] [--monitor NAME] [N%|+N%|N%-|off|on]
+# Backlight devices do not exist on this VM and Hyprland is absent, so:
+#   * the no-argument read path queries DDC/CI (ddcutil) for the named/focused
+#     monitor and prints the percentage, or exits 1 when the monitor does not
+#     answer DDC;
+#   * the set path writes DDC/CI brightness when possible;
+#   * `off`/`on` are no-ops (there is no DPMS control path without a compositor
+#     IPC in the port's QML; the panel does not call them).
+
+set -uo pipefail
+
+no_osd=0
+monitor=""
+
+while (($# > 0)); do
+  case "$1" in
+  --no-osd)
+    no_osd=1
+    shift
+    ;;
+  --monitor)
+    (($# >= 2)) || exit 1
+    monitor="$2"
+    shift 2
+    ;;
+  *)
+    break
+    ;;
+  esac
+done
+
+[[ -n $monitor ]] || monitor=$(niri msg --json focused-output 2>/dev/null | jq -r '.name // ""' 2>/dev/null)
+
+ddc_bus() {
+  ddcutil --skip-ddc-checks detect --brief 2>/dev/null | awk -v monitor="$monitor" '
+    /I2C bus:/ { bus = $NF; sub(/^.*\/i2c-/, "", bus) }
+    /DRM connector:/ {
+      connector = $NF
+      sub(/^card[0-9]+-/, "", connector)
+      if (connector == monitor && bus != "") { print bus; exit }
+      bus = ""
+    }
+  '
+}
+
+read_ddc() {
+  local bus
+  bus=$(ddc_bus)
+  [[ -n $bus ]] || return 1
+
+  ddcutil --bus "$bus" --skip-ddc-checks getvcp 10 --brief 2>/dev/null | awk '
+    $1 == "VCP" && toupper($2) == "10" && $3 == "C" && $4 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ && $5 > 0 {
+      printf "%d\n", ($4 * 100 + $5 / 2) / $5
+      found = 1
+      exit
+    }
+    END { exit !found }
+  '
+}
+
+set_ddc() {
+  local step=$1 bus current max target raw
+  bus=$(ddc_bus) || return 1
+  [[ -n $bus ]] || return 1
+
+  read -r current max < <(ddcutil --bus "$bus" --skip-ddc-checks getvcp 10 --brief 2>/dev/null | awk '
+    $1 == "VCP" && toupper($2) == "10" && $3 == "C" && $4 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ && $5 > 0 {
+      print $4, $5
+      found = 1
+      exit
+    }
+    END { exit !found }
+  ') || return 1
+
+  [[ -n ${current:-} && -n ${max:-} ]] || return 1
+  local percent=$(( (current * 100 + max / 2) / max ))
+
+  if [[ $step =~ ^([0-9]+)%$ ]]; then
+    target="${BASH_REMATCH[1]}"
+  elif [[ $step =~ ^\+([0-9]+)%$ ]]; then
+    target=$((percent + BASH_REMATCH[1]))
+  elif [[ $step =~ ^([0-9]+)%-$ ]]; then
+    target=$((percent - BASH_REMATCH[1]))
+  else
+    return 1
+  fi
+
+  ((target < 1)) && target=1
+  ((target > 100)) && target=100
+  raw=$(( (target * max + 50) / 100 ))
+
+  ddcutil --bus "$bus" --skip-ddc-checks --noverify setvcp 10 "$raw" >/dev/null 2>&1 || return 1
+  printf '%s\n' "$target"
+}
+
+if (($# == 0)); then
+  read_ddc || exit 1
+  exit 0
+fi
+
+step="$1"
+
+case "$step" in
+off | on)
+  # No compositor DPMS path on this port; accept and no-op.
+  exit 0
+  ;;
+esac
+
+percent=$(set_ddc "$step") || exit 1
+((no_osd)) || omarchy-osd -i brightness -p "$percent" 2>/dev/null || true
+printf '%s\n' "$percent"

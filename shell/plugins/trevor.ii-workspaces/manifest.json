@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "trevor.ii-workspaces",
+  "name": "ii Workspaces",
+  "version": "1.0.0",
+  "author": "tslove923",
+  "license": "MIT",
+  "description": "Workspace indicator styled after the illogical-impulse Quickshell bar: an animated active-workspace pill sliding between slots, with occupied workspaces shown as a joined translucent capsule. Ported for the niri session.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "ii Workspaces",
+    "description": "illogical-impulse-styled workspace indicator (active pill + occupied capsule)",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "left",
+    "defaults": {
+      "shown": 5,
+      "showAppIcons": true
+    },
+    "schema": [
+      { "key": "shown", "type": "number", "label": "Workspaces shown", "description": "How many fixed workspace slots to render." },
+      { "key": "showAppIcons", "type": "boolean", "label": "Show app icons", "description": "Overlay the focused window's app icon on occupied, unfocused workspace slots.", "defaultValue": true }
+    ]
+  }
+}

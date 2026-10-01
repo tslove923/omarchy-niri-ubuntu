@@ -1,0 +1,39 @@
+#!/bin/bash
+# Ubuntu-ported stub of the Omarchy helper `omarchy-osd`.
+# Ported for a niri-on-Ubuntu host (niri, Ubuntu 24.04): the real script forwards to the
+# Quickshell OSD target via `omarchy-shell -q osd show`. The port keeps that
+# route (the omarchy-shell IPC shim exists here) and degrades to a no-op when
+# the OSD plugin is not loaded, so callers such as brightness never fail.
+
+set -uo pipefail
+
+icon=""
+message=""
+progress=""
+duration=""
+
+while (($#)); do
+  case $1 in
+  -i | --icon) icon="${2:-}"; shift 2 ;;
+  -m | --message) message="${2:-}"; shift 2 ;;
+  -p | --progress) progress="${2:-}"; shift 2 ;;
+  -d | --duration) duration="${2:-}"; shift 2 ;;
+  -h | --help) exit 0 ;;
+  *) echo "Unknown OSD option: $1" >&2; exit 1 ;;
+  esac
+done
+
+progress_text=""
+[[ -n $progress ]] && progress_text="${progress}%"
+
+payload=$(jq -cn \
+  --arg icon "$icon" \
+  --arg message "$message" \
+  --arg value "$progress" \
+  --arg progressText "$progress_text" \
+  --arg max "100" \
+  --arg duration "$duration" \
+  '{icon:$icon,message:$message,value:$value,progressText:$progressText,max:$max,duration:$duration}')
+
+omarchy-shell -q osd show "$payload" >/dev/null 2>&1 || true
+exit 0

@@ -1,0 +1,11 @@
+[Unit]
+Description=Capture a fresh screenshot of the wall-kiosk dashboard for the live wallpaper
+# Only makes sense while a graphical Hyprland session is running.
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+# Optional: override URL/size/settle by editing wall-kiosk.env in the theme dir.
+# The leading "-" makes systemd ignore the file if it's missing.
+EnvironmentFile=-%h/.config/omarchy/themes/wall-kiosk/wall-kiosk.env
+ExecStart=%h/.config/omarchy/themes/wall-kiosk/bin/wall-kiosk-refresh.sh

@@ -1,0 +1,11 @@
+#!/bin/bash
+# Keep the wall-kiosk live-background timer running only while wall-kiosk is
+# the active theme, so switching to any other theme can never leave an
+# orphaned capture process/timer behind.
+THEME_NAME=$1
+
+if [[ $THEME_NAME == "wall-kiosk" ]]; then
+  systemctl --user enable --now wall-kiosk-capture.timer >/dev/null 2>&1
+else
+  systemctl --user disable --now wall-kiosk-capture.timer >/dev/null 2>&1
+fi

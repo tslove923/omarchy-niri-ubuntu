@@ -1,0 +1,7 @@
+#!/bin/bash
+# Launch the ported Omarchy quickshell shell under niri.
+export OMARCHY_PATH=$HOME/omarchy-port
+export QT_PLUGIN_PATH=/opt/Qt/6.8.3/gcc_64/plugins
+export QML2_IMPORT_PATH=/opt/Qt/6.8.3/gcc_64/qml:/usr/lib/x86_64-linux-gnu/qt6/qml
+export QML_IMPORT_PATH="$QML2_IMPORT_PATH"
+exec /usr/local/bin/quickshell -p $HOME/omarchy-port/shell/shell.qml

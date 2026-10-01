@@ -1,0 +1,10 @@
+#!/bin/bash
+# theme-set.d hooks only fire on an actual `omarchy theme set` call, not at
+# login. If wall-kiosk was already the active theme when the desktop starts
+# (e.g. after a reboot), make sure its refresh timer is running.
+THEME_NAME_FILE="$HOME/.local/state/omarchy/current/theme.name"
+current_theme=$(cat "$THEME_NAME_FILE" 2>/dev/null || echo "")
+
+if [[ $current_theme == "wall-kiosk" ]]; then
+  systemctl --user enable --now wall-kiosk-capture.timer >/dev/null 2>&1
+fi

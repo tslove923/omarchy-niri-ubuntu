@@ -1,0 +1,30 @@
+#!/bin/bash
+# Ubuntu-ported stub of the Omarchy helper `omarchy-audio-output-sink`.
+# Ported for a niri-on-Ubuntu host (niri, Ubuntu 24.04): prints the sink whose volume and
+# mute the current default output really uses. Reads the PipeWire graph with
+# `pw-dump`/`wpctl` instead of `pactl`. No speaker tuning / DSP sink exists on
+# this VM, so the default sink is returned unchanged.
+
+# wpctl marks the default sink with a leading '*'. Take its id from the Sinks
+# block, then map the id back to a node name via pw-dump.
+default_id=$(wpctl status -n 2>/dev/null | grep -m1 '^\s*│\s*\*' | sed -E 's/^[^0-9]*([0-9]+)\..*/\1/')
+
+sink=""
+if [[ -n $default_id ]]; then
+  sink=$(pw-dump 2>/dev/null | jq -r --argjson id "$default_id" '
+    .[] | select(.type == "PipeWire:Interface:Node" and .id == $id)
+        | .info.props["node.name"] // empty' | head -n 1)
+fi
+
+# Explicit argument (a sink name, or a numeric id) overrides detection.
+if [[ -n ${1:-} ]]; then
+  if [[ $1 =~ ^[0-9]+$ ]]; then
+    sink=$(pw-dump 2>/dev/null | jq -r --argjson id "$1" '
+      .[] | select(.type == "PipeWire:Interface:Node" and .id == $id)
+          | .info.props["node.name"] // empty' | head -n 1)
+  else
+    sink="$1"
+  fi
+fi
+
+printf '%s\n' "$sink"

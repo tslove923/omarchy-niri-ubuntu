@@ -1,0 +1,241 @@
+#!/bin/bash
+# Ubuntu-ported stub of the Omarchy helper `omarchy-reminder`.
+# Ported for a niri-on-Ubuntu host (niri, Ubuntu 24.04). Same CLI contract as the real
+# script (`<minutes> [message]`, `show [--json]`, `clear`, `-i`), but:
+#   * reminders are stored as plain state files under
+#     $XDG_RUNTIME_DIR/omarchy-reminders with a `deadline` epoch, rather than
+#     systemd --user transient timers (systemd-run --collect transient units
+#     are unreliable inside this VM);
+#   * a small background watcher re-checks deadlines and fires notifications;
+#     it is spawned on demand and self-reaps when no reminders remain;
+#   * `omarchy-notification-send` is provided by a sibling Ubuntu port that
+#     uses notify-send/mako instead of a raw busctl D-Bus call.
+
+set -euo pipefail
+
+reminder_dir="${XDG_RUNTIME_DIR:-/tmp}/omarchy-reminders"
+mkdir -p "$reminder_dir"
+
+format_remaining() {
+  local seconds=$1
+  local minutes=$((seconds / 60))
+  local remainder=$((seconds % 60))
+
+  if ((minutes > 0 && remainder > 0)); then
+    echo "${minutes}m ${remainder}s"
+  elif ((minutes > 0)); then
+    echo "${minutes}m"
+  else
+    echo "${remainder}s"
+  fi
+}
+
+# Each reminder is a file $reminder_dir/<id> holding "<deadline_epoch>\t<minutes>\t<message>".
+read_reminder() {
+  local file=$1
+  IFS=$'\t' read -r deadline minutes message <"$file" || return 1
+  [[ -n ${deadline:-} ]] || return 1
+}
+
+# Print active reminders as: id \t deadline \t minutes \t message
+active_reminders() {
+  local now=${1:-$(date +%s)}
+  local file deadline
+  for file in "$reminder_dir"/*; do
+    [[ -f $file ]] || continue
+    read_reminder "$file" || {
+      rm -f "$file"
+      continue
+    }
+    ((deadline <= now)) && continue
+    printf '%s\t%s\t%s\t%s\n' "${file##*/}" "$deadline" "$minutes" "$message"
+  done
+}
+
+refresh_indicator() {
+  omarchy-shell -q omarchy.indicators refresh >/dev/null 2>&1 || true
+}
+
+open_interactive() {
+  omarchy-shell shell summon omarchy.reminders "{}"
+}
+
+show_reminders() {
+  local id deadline minutes message body=""
+  local now=$(date +%s)
+
+  while IFS=$'\t' read -r id deadline minutes message; do
+    if [[ -n $message ]]; then
+      body+="$message in $(format_remaining $((deadline - now))) ($(date -d "@$deadline" +%-H:%M))"$'\n'
+    else
+      body+="${minutes}-min reminder in $(format_remaining $((deadline - now))) ($(date -d "@$deadline" +%-H:%M))"$'\n'
+    fi
+  done < <(active_reminders "$now")
+
+  if [[ -z $body ]]; then
+    omarchy-notification-send -g 󰢌 "Upcoming reminders" "No outstanding reminders"
+  else
+    omarchy-notification-send -g 󰢌 "Upcoming reminders" "${body%$'\n'}"
+  fi
+}
+
+show_json() {
+  local id deadline minutes message label item_json reminders_json="[]"
+  local now=$(date +%s)
+  local count=0
+  local tooltip="Set Reminder"
+
+  while IFS=$'\t' read -r id deadline minutes message; do
+    count=$((count + 1))
+
+    [[ ! $minutes =~ ^[0-9]+$ ]] && minutes=0
+    if [[ -n $message ]]; then
+      label=$message
+    else
+      label="${minutes}-min reminder"
+    fi
+
+    item_json=$(jq -cn \
+      --arg unit "$id" \
+      --arg timer "$id" \
+      --arg label "$label" \
+      --arg message "$message" \
+      --arg remaining "$(format_remaining "$((deadline - now))")" \
+      --arg atTime "$(date -d "@$deadline" +%-H:%M)" \
+      --argjson minutes "$minutes" \
+      --argjson at "$deadline" \
+      --argjson remainingSeconds "$((deadline - now))" \
+      '{unit:$unit,timer:$timer,minutes:$minutes,message:$message,label:$label,remaining:$remaining,remainingSeconds:$remainingSeconds,at:$at,atTime:$atTime}')
+    reminders_json=$(jq -cn --argjson reminders "$reminders_json" --argjson item "$item_json" '$reminders + [$item]')
+  done < <(active_reminders "$now")
+
+  if ((count == 1)); then
+    tooltip="1 reminder"
+  elif ((count > 1)); then
+    tooltip="$count reminders"
+  fi
+
+  jq -cn --argjson count "$count" --arg tooltip "$tooltip" --argjson reminders "$reminders_json" '{count:$count,active:($count > 0),tooltip:$tooltip,reminders:$reminders}'
+}
+
+clear_reminders() {
+  local file
+  for file in "$reminder_dir"/*; do
+    [[ -f $file ]] || continue
+    rm -f "$file"
+  done
+  refresh_indicator
+  omarchy-notification-send -g 󰢌 "All reminders have been cleared"
+}
+
+# Watcher: sleeps until the next deadline, fires it, repeats until empty.
+watch_reminders() {
+  local next file deadline message now
+  while :; do
+    now=$(date +%s)
+    next=""
+    for file in "$reminder_dir"/*; do
+      [[ -f $file ]] || continue
+      read_reminder "$file" || {
+        rm -f "$file"
+        continue
+      }
+      if [[ -z $next || $deadline -lt $next ]]; then
+        next=$deadline
+      fi
+    done
+
+    [[ -z $next ]] && break
+
+    if ((next > now)); then
+      sleep $((next - now))
+    fi
+
+    now=$(date +%s)
+    for file in "$reminder_dir"/*; do
+      [[ -f $file ]] || continue
+      read_reminder "$file" || {
+        rm -f "$file"
+        continue
+      }
+      if ((deadline <= now)); then
+        if [[ -n $message ]]; then
+          omarchy-notification-send -g 󰢌 "Reminder" "$message"
+        else
+          omarchy-notification-send -g 󰢌 "Reminder" "Your ${minutes} minutes are up"
+        fi
+        rm -f "$file"
+        refresh_indicator
+      fi
+    done
+  done
+}
+
+ensure_watcher() {
+  if ! pgrep -f "omarchy-reminder --watch" >/dev/null 2>&1; then
+    setsid "$0" --watch >/dev/null 2>&1 </dev/null &
+  fi
+}
+
+usage() {
+  echo "Usage: omarchy-reminder [-i|--interactive]"
+  echo "       omarchy-reminder <minutes> [message]"
+  echo "       omarchy-reminder show [-j|--json]"
+  echo "       omarchy-reminder clear"
+}
+
+# Internal watcher entry point.
+if [[ ${1:-} == "--watch" ]]; then
+  watch_reminders
+  exit 0
+fi
+
+case ${1:-} in
+-i | --interactive)
+  open_interactive
+  exit 0
+  ;;
+show | list)
+  case ${2:-} in
+  -j | --json)
+    show_json
+    ;;
+  "")
+    show_reminders
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+  esac
+  exit 0
+  ;;
+clear)
+  clear_reminders
+  exit 0
+  ;;
+esac
+
+minutes=${1:-}
+shift || true
+message="$*"
+
+if [[ -z $minutes ]] || [[ ! $minutes =~ ^[0-9]+$ ]] || ((minutes == 0)); then
+  usage
+  exit 1
+fi
+
+if [[ -z $message ]]; then
+  message="Your ${minutes} minutes are up"
+fi
+
+set_at=$(date +%s)
+remind_at=$(date -d "+${minutes} minutes" +%H:%M)
+id="omarchy-reminder-${minutes}m-$set_at"
+deadline=$((set_at + minutes * 60))
+
+printf '%s\t%s\t%s\n' "$deadline" "$minutes" "$message" >"$reminder_dir/$id"
+
+ensure_watcher
+refresh_indicator
+omarchy-notification-send -g 󰢌 "Reminder set for ${minutes} minutes" "You'll be reminded at $remind_at"

@@ -1,0 +1,6 @@
+# Runtime-generated live-background captures (created by the refresh timer)
+backgrounds/live-*.png
+
+# Python
+__pycache__/
+*.pyc

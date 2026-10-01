@@ -1,0 +1,52 @@
+#!/bin/bash
+# Ubuntu-ported stub of the Omarchy helper `omarchy-monitor-state`.
+# Ported for a niri-on-Ubuntu host (niri, Ubuntu 24.04): the real script reads Hyprland's
+# `hyprctl monitors -j`; here the same 8-line contract is produced from
+# `niri msg --json outputs` (with `focused-output` for the focused name), and
+# brightness comes from a DDC/CI-backed sibling port rather than backlight.
+#
+# Output lines (exactly what the monitor panel parses):
+#   1  brightness percentage, or "unavailable"
+#   2  internal monitor name, or ""
+#   3  external monitor name, or ""
+#   4  internal monitor name when enabled, or ""
+#   5  mirror source/output name, or ""
+#   6  focused monitor name
+#   7  focused monitor scale
+#   8  JSON array of {name, enabled, focused, width, height}
+
+set -uo pipefail
+
+outputs_json=$(niri msg --json outputs 2>/dev/null || echo '{}')
+focused=$(niri msg --json focused-output 2>/dev/null | jq -r '.name // ""' 2>/dev/null)
+
+brightness=$(omarchy-brightness-display --monitor "$focused" 2>/dev/null)
+printf '%s\n' "${brightness:-unavailable}"
+
+# Internal vs external by connector prefix; niri reports width/height in
+# logical pixels (already divided by scale).
+printf '%s\n' "$outputs_json" | jq -r '
+  def internal: test("^(eDP|LVDS|DSI)-");
+  (to_entries | map(.key)),
+  (
+    [to_entries[] | select(.key | internal) | .key][0] // "",
+    [to_entries[] | select((.key | internal) | not) | .key][0] // "",
+    [to_entries[] | select((.key | internal) and (.value.is_disabled != true)) | .key][0] // "",
+    [to_entries[] | select(.value.mirror_of != null and .value.mirror_of != "") | (if (.key | internal) then .value.mirror_of else .key end)][0] // ""
+  ) | .[]
+'
+
+printf '%s\n' "$focused"
+
+printf '%s\n' "$outputs_json" | jq -r --arg focused "$focused" '
+  (. as $o | $o[$focused] // null) | (.logical.scale // "") | if . == "" then "" else "\(.)" end
+'
+
+printf '%s\n' "$outputs_json" | jq -c --arg focused "$focused" '
+  [to_entries[] | {
+    name: .key,
+    enabled: (.value.is_disabled != true),
+    focused: (.key == $focused),
+    width: (.value.logical.width // 0),
+    height: (.value.logical.height // 0)
+  }]'

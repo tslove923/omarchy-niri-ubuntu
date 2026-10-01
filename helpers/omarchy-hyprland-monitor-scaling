@@ -1,0 +1,87 @@
+#!/bin/bash
+# Ubuntu-ported stub of the Omarchy helper `omarchy-hyprland-monitor-scaling`.
+# Ported for a niri-on-Ubuntu host (niri, Ubuntu 24.04): same CLI surface
+#   omarchy-hyprland-monitor-scaling [up|down|SCALE]
+# but scaling is read from and written to niri instead of Hyprland:
+#   read  -> current scale of the focused output (niri msg --json focused-output)
+#   write -> `niri msg output <name> scale <value>` (niri 25.x syntax), falling
+#            back to the `niri msg action set-output-scale` form on older niri.
+
+set -uo pipefail
+
+SCALES=(1 1.25 1.6 2 3 4)
+
+focused_name() {
+  niri msg --json focused-output 2>/dev/null | jq -r '.name // ""'
+}
+
+focused_json() {
+  niri msg --json focused-output 2>/dev/null
+}
+
+current_scale() {
+  focused_json | jq -r '.logical.scale // ""' 2>/dev/null
+}
+
+clean_scale() {
+  # niri accepts fractional scales; keep the requested value, normalized.
+  awk -v s="$1" 'BEGIN { printf "%g\n", s }'
+}
+
+set_scale() {
+  local scale="$1" name
+  name=$(focused_name)
+  [[ -n $name ]] || { echo "No focused output." >&2; exit 1; }
+
+  scale=$(clean_scale "$scale")
+
+  if niri msg output "$name" scale "$scale" >/dev/null 2>&1; then
+    printf '%s\n' "$scale"
+    return 0
+  fi
+
+  if niri msg action set-output-scale "$name" "$scale" >/dev/null 2>&1; then
+    printf '%s\n' "$scale"
+    return 0
+  fi
+
+  echo "Error: could not set scale on $name." >&2
+  exit 1
+}
+
+case "${1:-}" in
+"")
+  current_scale
+  ;;
+-h | --help)
+  echo "Usage: omarchy-hyprland-monitor-scaling [up|down|SCALE]"
+  ;;
+up)
+  cur=$(current_scale)
+  # find the next preset strictly above the current value
+  next=$(awk -v cur="$cur" -v list="${SCALES[*]}" 'BEGIN {
+    n = split(list, a, " ")
+    for (i = 1; i <= n; i++) { if (a[i] > cur + 0.001) { print a[i]; exit } }
+    print a[n]
+  }')
+  set_scale "$next"
+  ;;
+down)
+  cur=$(current_scale)
+  prev=$(awk -v cur="$cur" -v list="${SCALES[*]}" 'BEGIN {
+    n = split(list, a, " ")
+    best = a[1]
+    for (i = 1; i <= n; i++) { if (a[i] < cur - 0.001) best = a[i] }
+    print best
+  }')
+  set_scale "$prev"
+  ;;
+*)
+  if [[ $1 =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    set_scale "$1"
+  else
+    echo "Usage: omarchy-hyprland-monitor-scaling [up|down|SCALE]" >&2
+    exit 1
+  fi
+  ;;
+esac

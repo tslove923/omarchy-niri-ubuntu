@@ -1,0 +1,63 @@
+#!/bin/bash
+# Ubuntu-ported stub of the Omarchy helper `omarchy-notification-send`.
+# Ported for a niri-on-Ubuntu host (niri, Ubuntu 24.04): same headline/description/glyph
+# CLI surface, but the D-Bus payload is sent with `notify-send` (mako is the
+# notification daemon here) instead of a raw `busctl ... Notify` call. The
+# glyph and image hints the Omarchy shell expects are passed through as hints
+# where notify-send supports them.
+
+set -uo pipefail
+
+headline=""
+description=""
+glyph=""
+urgency="low"
+app_name="omarchy-action"
+app_icon=""
+expire_timeout=""
+image=""
+
+usage() {
+  echo "Usage: omarchy-notification-send [--app-name <app-name>] [-g <glyph>] [-u <low|normal|critical>] [-i <icon>] [-t <ms>] [--image <path-or-uri>] <headline> [description]" >&2
+}
+
+while (($# > 0)); do
+  case "$1" in
+  -g | --glyph) glyph="${2:-}"; shift 2 ;;
+  -u | --urgency) urgency="${2:-}"; shift 2 ;;
+  --app-name) app_name="${2:-}"; shift 2 ;;
+  -i | --icon) app_icon="${2:-}"; shift 2 ;;
+  --image) image="${2:-}"; shift 2 ;;
+  -t | --expire-time) expire_timeout="${2:-}"; shift 2 ;;
+  -r | --replace-id) shift 2 ;;
+  -p | --print-id) shift ;;
+  --exec) shift; break ;;
+  -h | --help) usage; exit 0 ;;
+  --) shift; break ;;
+  *) break ;;
+  esac
+done
+
+if (($# < 1)); then
+  usage
+  exit 1
+fi
+
+headline=$1
+shift || true
+[[ $# -gt 0 ]] && description=$1
+
+args=()
+[[ -n $urgency ]] && args+=(-u "$urgency")
+[[ -n $app_name ]] && args+=(-a "$app_name")
+[[ -n $app_icon ]] && args+=(-i "$app_icon")
+[[ -n $expire_timeout ]] && args+=(-t "$expire_timeout")
+
+if [[ -n $glyph ]]; then
+  args+=(-h "string:omarchy-glyph:$glyph")
+fi
+if [[ -n $image ]]; then
+  args+=(-h "string:image-path:$image")
+fi
+
+exec notify-send "${args[@]}" "$headline" "$description"

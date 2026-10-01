@@ -1,0 +1,19 @@
+[Unit]
+Description=Periodically refresh the wall-kiosk live wallpaper
+
+[Timer]
+# First capture shortly after the timer is (re)started, e.g. right after
+# `omarchy theme set wall-kiosk` or at login if wall-kiosk is already active.
+OnActiveSec=5s
+# Refresh cadence. This is the one number to tune if 30s feels too fast/slow
+# for how quickly the dashboard's own content actually changes -- edit this
+# line, then: systemctl --user daemon-reload && systemctl --user restart wall-kiosk-capture.timer
+OnUnitActiveSec=30s
+AccuracySec=2s
+# A missed tick (e.g. laptop was suspended) isn't worth catching up on --
+# just wait for the next one.
+Persistent=false
+Unit=wall-kiosk-capture.service
+
+[Install]
+WantedBy=timers.target

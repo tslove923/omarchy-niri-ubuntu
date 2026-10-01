@@ -1,0 +1,15 @@
+#!/bin/bash
+# Ubuntu-ported stub of the Omarchy helper `omarchy-audio-sink-availability`.
+# Ported for a niri-on-Ubuntu host (niri, Ubuntu 24.04): prints "<node.name>\t<1|0>" for
+# every PipeWire sink, the same tab-separated contract the audio panel parses.
+# Reads the graph with `pw-dump` (JSON) instead of `pactl`, which is not
+# installed here. There is no speaker tuning on this VM, so each sink is
+# reported available.
+
+pw-dump 2>/dev/null | jq -r '
+  .[]
+  | select(.type == "PipeWire:Interface:Node")
+  | select(.info.props["media.class"] == "Audio/Sink")
+  | select(.info.props["node.name"] != null)
+  | "\(.info.props["node.name"])\t1"
+'
