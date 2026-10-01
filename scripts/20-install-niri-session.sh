@@ -71,6 +71,16 @@ sudo apt-get install -y -qq \
 # (libxkbcommon-tools) is what the bar's keyboard-layout widget calls;
 # inotifywait (inotify-tools) drives config reloads.
 
+# Make Alacritty the default terminal. Without this, xdg-terminal-exec
+# resolves to whatever the desktop shipped (often GNOME Terminal), so
+# Mod+Return opens the wrong terminal.
+mkdir -p "$HOME/.config"
+printf 'Alacritty.desktop\n' > "$HOME/.config/xdg-terminals.list"
+log "xdg-terminal-exec default -> Alacritty"
+
+# btop is the 'Activity' monitor (Super+Shift+T via omakub-launch-tui btop).
+command -v btop >/dev/null 2>&1 || sudo apt-get install -y -qq btop || true
+
 # ---------------------------------------------------------------------------
 # 3. herdr (agent terminal multiplexer) - optional but baked into binds
 # ---------------------------------------------------------------------------
